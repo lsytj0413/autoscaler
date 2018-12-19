@@ -131,14 +131,15 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	glog.V(4).Info("Starting main loop")
 
 	stateUpdateStart := time.Now()
-	allNodes, readyNodes, typedErr := a.obtainNodeLists()
+	allNodes, readyNodes, typedErr := a.obtainNodeLists() // 获取所有的 Node 和 readyNode, 并且将 GPU 未完成配置或者分配完的 node 修改为 unready
 	if typedErr != nil {
 		return typedErr
 	}
-	if a.actOnEmptyCluster(allNodes, readyNodes, currentTime) {
+	if a.actOnEmptyCluster(allNodes, readyNodes, currentTime) { // 如果是空集群则直接退出
 		return nil
 	}
 
+	// 同步一下 cloudprovider 的数据
 	typedErr = a.updateClusterState(allNodes, currentTime)
 	if typedErr != nil {
 		return typedErr
@@ -158,7 +159,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	unregisteredNodes := a.clusterStateRegistry.GetUnregisteredNodes()
 	if len(unregisteredNodes) > 0 {
 		glog.V(1).Infof("%d unregistered nodes present", len(unregisteredNodes))
-		removedAny, err := removeOldUnregisteredNodes(unregisteredNodes, autoscalingContext, currentTime, autoscalingContext.LogRecorder)
+		removedAny, err := removeOldUnregisteredNodes(unregisteredNodes, autoscalingContext, currentTime, autoscalingContext.LogRecorder) // 首先删除 unregister 的节点
 		// There was a problem with removing unregistered nodes. Retry in the next loop.
 		if err != nil {
 			if removedAny {
@@ -210,12 +211,13 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 		return errors.ToAutoscalerError(errors.ApiCallError, err)
 	}
 
-	allUnschedulablePods, allScheduled, err = a.processors.PodListProcessor.Process(a.AutoscalingContext, allUnschedulablePods, allScheduled, allNodes)
+	allUnschedulablePods, allScheduled, err = a.processors.PodListProcessor.Process(a.AutoscalingContext, allUnschedulablePods, allScheduled, allNodes) // Default 中未做任何处理
 	if err != nil {
 		glog.Errorf("Failed to process pod list: %v", err)
 		return errors.ToAutoscalerError(errors.InternalError, err)
 	}
 
+	// 处理 Pod Affinity, 设置 checker 对应属性
 	ConfigurePredicateCheckerForLoop(allUnschedulablePods, allScheduled, a.PredicateChecker)
 
 	// We need to check whether pods marked as unschedulable are actually unschedulable.
@@ -235,8 +237,12 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	// which is supposed to schedule on an existing node.
 	scaleDownForbidden := false
 
+	// 清除 tpu request, 即删除 requests 中 tpu 相关
 	unschedulablePodsWithoutTPUs := tpu.ClearTPURequests(allUnschedulablePods)
 
+	// 以下节点不参与 scale up 计算:
+	// 1. 设置了优先级并低于 priority cutoff
+	// 2. 设置了 NominatedNodeName Annotation 的进入 waiting, 因为它是抢占式的
 	// Some unschedulable pods can be waiting for lower priority pods preemption so they have nominated node to run.
 	// Such pods don't require scale up but should be considered during scale down.
 	unschedulablePods, unschedulableWaitingForLowerPriorityPreemption := FilterOutExpendableAndSplit(unschedulablePodsWithoutTPUs, a.ExpendablePodsPriorityCutoff)
@@ -244,7 +250,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	glog.V(4).Infof("Filtering out schedulables")
 	filterOutSchedulableStart := time.Now()
 	unschedulablePodsToHelp := FilterOutSchedulable(unschedulablePods, readyNodes, allScheduled,
-		unschedulableWaitingForLowerPriorityPreemption, a.PredicateChecker, a.ExpendablePodsPriorityCutoff)
+		unschedulableWaitingForLowerPriorityPreemption, a.PredicateChecker, a.ExpendablePodsPriorityCutoff) // 再次排除掉某些实际上是可以调度的 pod, 进行了一次模拟
 	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
 
 	if len(unschedulablePodsToHelp) != len(unschedulablePods) {
@@ -275,6 +281,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 		scaleUpStart := time.Now()
 		metrics.UpdateLastTime(metrics.ScaleUp, scaleUpStart)
 
+		// 实际进行的 scale up 处理, 查找实际需要的 node group
 		scaleUpStatus, typedErr := ScaleUp(autoscalingContext, a.processors, a.clusterStateRegistry, unschedulablePodsToHelp, readyNodes, daemonsets)
 
 		metrics.UpdateDurationFromStart(metrics.ScaleUp, scaleUpStart)
@@ -294,6 +301,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	}
 
 	if a.ScaleDownEnabled {
+		// DOC: 拿到所有 pdb, 在 scaledown 的检查时需要使用
 		pdbs, err := pdbLister.List()
 		if err != nil {
 			glog.Errorf("Failed to list pod disruption budgets: %v", err)
@@ -305,8 +313,10 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 		glog.V(4).Infof("Calculating unneeded nodes")
 
 		scaleDown.CleanUp(currentTime)
+		// 获取被 scaler 管理的, nodegroup size > min 的 node
 		potentiallyUnneeded := getPotentiallyUnneededNodes(autoscalingContext, allNodes)
 
+		// DOC: 更新 unneeded nodes 信息, 计算 unneeded nodes 上的 pod 是否都可以被调度到其他 node
 		typedErr := scaleDown.UpdateUnneededNodes(allNodes, potentiallyUnneeded, append(allScheduled, unschedulableWaitingForLowerPriorityPreemption...), currentTime, pdbs)
 		if typedErr != nil {
 			glog.Errorf("Failed to scale down: %v", typedErr)
@@ -333,6 +343,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 			calculateUnneededOnly, a.lastScaleUpTime, a.lastScaleDownDeleteTime, a.lastScaleDownFailTime,
 			scaleDownForbidden, scaleDown.nodeDeleteStatus.IsDeleteInProgress())
 
+		// DOC: 是否并不是需要缩容(例如处于冷却时间或者正在缩容(缩容是通过 goroutine 运行的))
 		if !calculateUnneededOnly {
 			glog.V(4).Infof("Starting scale down")
 
@@ -342,6 +353,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 
 			scaleDownStart := time.Now()
 			metrics.UpdateLastTime(metrics.ScaleDown, scaleDownStart)
+			// DOC: 尝试缩容
 			result, typedErr := scaleDown.TryToScaleDown(allNodes, allScheduled, pdbs, currentTime)
 			metrics.UpdateDurationFromStart(metrics.ScaleDown, scaleDownStart)
 

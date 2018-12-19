@@ -251,12 +251,12 @@ func ScaleUp(context *context.AutoscalingContext, processors *ca_processors.Auto
 	}
 	glogx.V(1).Over(loggingQuota).Infof("%v other pods are also unschedulable", -loggingQuota.Left())
 	nodeInfos, err := GetNodeInfosForGroups(nodes, context.CloudProvider, context.ClientSet,
-		daemonSets, context.PredicateChecker)
+		daemonSets, context.PredicateChecker) // 将 node 转换到对应的 nodeinfo, 按照 node group 分组
 	if err != nil {
 		return nil, err.AddPrefix("failed to build node infos for node groups: ")
 	}
 
-	nodesFromNotAutoscaledGroups, err := FilterOutNodesFromNotAutoscaledGroups(nodes, context.CloudProvider)
+	nodesFromNotAutoscaledGroups, err := FilterOutNodesFromNotAutoscaledGroups(nodes, context.CloudProvider) // 找到所有没有 node group 的 node
 	if err != nil {
 		return nil, err.AddPrefix("failed to filter out nodes which are from not autoscaled groups: ")
 	}
@@ -275,6 +275,7 @@ func ScaleUp(context *context.AutoscalingContext, processors *ca_processors.Auto
 		return nil, errLimits.AddPrefix("Could not compute total resources: ")
 	}
 
+	// 收集正要 ready 的 node?
 	upcomingNodes := make([]*schedulercache.NodeInfo, 0)
 	for nodeGroup, numberOfNodes := range clusterStateRegistry.GetUpcomingNodes() {
 		nodeTemplate, found := nodeInfos[nodeGroup]
@@ -341,7 +342,7 @@ func ScaleUp(context *context.AutoscalingContext, processors *ca_processors.Auto
 			Pods:      make([]*apiv1.Pod, 0),
 		}
 
-		option.Pods = FilterSchedulablePodsForNode(context, unschedulablePods, nodeGroup.Id(), nodeInfo)
+		option.Pods = FilterSchedulablePodsForNode(context, unschedulablePods, nodeGroup.Id(), nodeInfo) // 获取在该 node 类型上可调度的 pod
 		for _, pod := range option.Pods {
 			podsRemainUnschedulable[pod] = false
 		}
@@ -377,6 +378,7 @@ func ScaleUp(context *context.AutoscalingContext, processors *ca_processors.Auto
 		return &status.ScaleUpStatus{ScaledUp: false, PodsRemainUnschedulable: getRemainingPods(podsRemainUnschedulable)}, nil
 	}
 
+	// 针对每个 nodegroup 模拟完成, 选择一个 nodegroup
 	// Pick some expansion option.
 	bestOption := context.ExpanderStrategy.BestOption(expansionOptions, nodeInfos)
 	if bestOption != nil && bestOption.NodeCount > 0 {

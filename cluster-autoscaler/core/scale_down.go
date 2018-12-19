@@ -110,6 +110,7 @@ type scaleDownResourcesDelta map[string]int64
 const scaleDownLimitUnknown = math.MinInt64
 
 func computeScaleDownResourcesLeftLimits(nodes []*apiv1.Node, resourceLimiter *cloudprovider.ResourceLimiter, cp cloudprovider.CloudProvider, timestamp time.Time) scaleDownResourcesLimits {
+	// DOC: 计算节点的 cpu/memory 资源总量
 	totalCores, totalMem := calculateScaleDownCoresMemoryTotal(nodes, timestamp)
 
 	var totalGpus map[string]int64
@@ -562,6 +563,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 	nodeDeletionDuration := time.Duration(0)
 	findNodesToRemoveDuration := time.Duration(0)
 	defer updateScaleDownMetrics(time.Now(), &findNodesToRemoveDuration, &nodeDeletionDuration)
+	// DOC: 筛选除所有的 master node(上面没有 api-server 的 pod)
 	nodesWithoutMaster := filterOutMasters(allNodes, pods)
 	candidates := make([]*apiv1.Node, 0)
 	readinessMap := make(map[string]bool)
@@ -574,11 +576,13 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 			errCP)
 	}
 
+	// DOC: 计算能缩容的资源量(cpu, memory, gpu)
 	scaleDownResourcesLeft := computeScaleDownResourcesLeftLimits(nodesWithoutMaster, resourceLimiter, sd.context.CloudProvider, currentTime)
 
 	nodeGroupSize := getNodeGroupSizeMap(sd.context.CloudProvider)
 	resourcesWithLimits := resourceLimiter.GetResources()
 	for _, node := range nodesWithoutMaster {
+		// DOC: unneededNodes 中包含可以缩容的节点
 		if val, found := sd.unneededNodes[node.Name]; found {
 
 			glog.V(2).Infof("%s was unneeded for %s", node.Name, currentTime.Sub(val).String())
@@ -592,6 +596,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 			ready, _, _ := kube_util.GetReadinessState(node)
 			readinessMap[node.Name] = ready
 
+			// DOC: 不同 ready 状态的 node 需要不同的删除时间
 			// Check how long the node was underutilized.
 			if ready && !val.Add(sd.context.ScaleDownUnneededTime).Before(currentTime) {
 				continue
@@ -602,6 +607,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 				continue
 			}
 
+			// DOC: 检查 nodeGroup 的 minSize
 			nodeGroup, err := sd.context.CloudProvider.NodeGroupForNode(node)
 			if err != nil {
 				glog.Errorf("Error while checking node group for %s: %v", node.Name, err)
@@ -623,12 +629,14 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 				continue
 			}
 
+			// DOC: 计算被删除 node 的资源量
 			scaleDownResourcesDelta, err := computeScaleDownResourcesDelta(node, nodeGroup, resourcesWithLimits)
 			if err != nil {
 				glog.Errorf("Error getting node resources: %v", err)
 				continue
 			}
 
+			// DOC: 检查是否超出可以删除的资源量, 此处删除的话不更新?
 			checkResult := scaleDownResourcesLeft.checkScaleDownDeltaWithinLimits(scaleDownResourcesDelta)
 			if checkResult.exceeded {
 				glog.V(4).Infof("Skipping %s - minimal limit exceeded for %v", node.Name, checkResult.exceededResources)

@@ -114,12 +114,15 @@ func FilterOutSchedulable(unschedulableCandidates []*apiv1.Pod, nodes []*apiv1.N
 	predicateChecker *simulator.PredicateChecker, expendablePodsPriorityCutoff int) []*apiv1.Pod {
 
 	unschedulablePods := []*apiv1.Pod{}
+	// 获取所有可能可以调度的 pod
 	nonExpendableScheduled := FilterOutExpendablePods(allScheduled, expendablePodsPriorityCutoff)
+	// 将 pod 和 node 合并为 nodeinfo
 	nodeNameToNodeInfo := scheduler_util.CreateNodeNameToInfoMap(append(nonExpendableScheduled, podsWaitingForLowerPriorityPreemption...), nodes)
 	podSchedulable := make(podSchedulableMap)
 
 	loggingQuota := glogx.PodsLoggingQuota()
 
+	// 检查所有的 不可调度的 是否可调度到 某节点, 避免只是调度器没来得及调度的情况
 	for _, pod := range unschedulableCandidates {
 		if schedulable, found := podSchedulable.get(pod); found {
 			if !schedulable {
