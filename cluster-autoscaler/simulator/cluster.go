@@ -123,6 +123,7 @@ candidateloop:
 
 // FindEmptyNodesToRemove finds empty nodes that can be removed.
 func FindEmptyNodesToRemove(candidates []*apiv1.Node, pods []*apiv1.Pod) []*apiv1.Node {
+	// DOC: 找到所有的 nodeinfo(pods + candidates), 并移除没有的 node(candidates 所有都在, pods 中的node不在的被移除), 即 candidates 中有 pods 的
 	nodeNameToNodeInfo := scheduler_util.CreateNodeNameToInfoMap(pods, candidates)
 	result := make([]*apiv1.Node, 0)
 	for _, node := range candidates {

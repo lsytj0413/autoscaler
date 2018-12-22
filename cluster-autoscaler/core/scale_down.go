@@ -643,6 +643,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 				continue
 			}
 
+			// DOC: 节点可以被缩容, 放到 candidates 中
 			candidates = append(candidates, node)
 			candidateNodeGroups[node.Name] = nodeGroup
 		}
@@ -652,6 +653,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 		return ScaleDownNoUnneeded, nil
 	}
 
+	// DOC: 获取所有可被删除的 empty node, 并进行实际的删除
 	// Trying to delete empty nodes in bulk. If there are no empty nodes then CA will
 	// try to delete not-so-empty nodes, possibly killing some pods and allowing them
 	// to recreate on other nodes.
@@ -742,6 +744,7 @@ func getEmptyNodesNoResourceLimits(candidates []*apiv1.Node, pods []*apiv1.Pod, 
 func getEmptyNodes(candidates []*apiv1.Node, pods []*apiv1.Pod, maxEmptyBulkDelete int,
 	resourcesLimits scaleDownResourcesLimits, cloudProvider cloudprovider.CloudProvider) []*apiv1.Node {
 
+	// DOC: 找到所有的空 node(即上面没有 pod 运行的, 或者运行的 pod 可以移走的)
 	emptyNodes := simulator.FindEmptyNodesToRemove(candidates, pods)
 	availabilityMap := make(map[string]int)
 	result := make([]*apiv1.Node, 0)
@@ -773,6 +776,7 @@ func getEmptyNodes(candidates []*apiv1.Node, pods []*apiv1.Pod, maxEmptyBulkDele
 			availabilityMap[nodeGroup.Id()] = available
 		}
 		if available > 0 {
+			// DOC: 减掉资源量
 			resourcesDelta, err := computeScaleDownResourcesDelta(node, nodeGroup, resourcesNames)
 			if err != nil {
 				glog.Errorf("Error: %v", err)
@@ -787,6 +791,7 @@ func getEmptyNodes(candidates []*apiv1.Node, pods []*apiv1.Pod, maxEmptyBulkDele
 			result = append(result, node)
 		}
 	}
+	// DOC: 可配置一次性删除的 empty node 的最大数量, 此处确保删除数量在范围内
 	limit := maxEmptyBulkDelete
 	if len(result) < limit {
 		limit = len(result)
@@ -794,6 +799,7 @@ func getEmptyNodes(candidates []*apiv1.Node, pods []*apiv1.Pod, maxEmptyBulkDele
 	return result[:limit]
 }
 
+// DOC: 进行实际的 node 删除?
 func (sd *ScaleDown) scheduleDeleteEmptyNodes(emptyNodes []*apiv1.Node, client kube_client.Interface,
 	recorder kube_record.EventRecorder, readinessMap map[string]bool,
 	candidateNodeGroups map[string]cloudprovider.NodeGroup, confirmation chan errors.AutoscalerError) {
