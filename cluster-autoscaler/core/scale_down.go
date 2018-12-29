@@ -376,6 +376,7 @@ func (sd *ScaleDown) UpdateUnneededNodes(
 
 	// Phase1 - look at the nodes utilization. Calculate the utilization
 	// only for the managed nodes.
+	// DOC: 筛选空节点(空节点即pod可以简单的删除的节点), 分类保存到不同的list中
 	for _, node := range filteredNodesToCheck {
 
 		// Skip nodes marked to be deleted, if they were marked recently.
@@ -670,6 +671,7 @@ func (sd *ScaleDown) TryToScaleDown(allNodes []*apiv1.Node, pods []*apiv1.Pod, p
 		return ScaleDownError, err.AddPrefix("failed to delete at least one empty node: ")
 	}
 
+	// DOC: 如果没有 emptyNode，则对可删除的node先执行 drain 驱逐所有的pod，然后再进行删除
 	findNodesToRemoveStart := time.Now()
 	// Only scheduled non expendable pods are taken into account and have to be moved.
 	nonExpendablePods := FilterOutExpendablePods(pods, sd.context.ExpendablePodsPriorityCutoff)

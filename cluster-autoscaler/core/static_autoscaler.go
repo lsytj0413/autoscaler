@@ -159,14 +159,13 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	unregisteredNodes := a.clusterStateRegistry.GetUnregisteredNodes()
 	if len(unregisteredNodes) > 0 {
 		glog.V(1).Infof("%d unregistered nodes present", len(unregisteredNodes))
-		removedAny, err := removeOldUnregisteredNodes(unregisteredNodes, autoscalingContext, currentTime, autoscalingContext.LogRecorder) // 首先删除 unregister 的节点
+		removedAny, err := removeOldUnregisteredNodes(unregisteredNodes, autoscalingContext, currentTime, autoscalingContext.LogRecorder) // 首先删除 unregister 的节点, 不保存在模拟调度的范围内
 		// There was a problem with removing unregistered nodes. Retry in the next loop.
 		if err != nil {
 			if removedAny {
 				glog.Warningf("Some unregistered nodes were removed, but got error: %v", err)
 			} else {
 				glog.Errorf("Failed to remove unregistered nodes: %v", err)
-
 			}
 			return errors.ToAutoscalerError(errors.CloudProviderError, err)
 		}

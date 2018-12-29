@@ -114,7 +114,7 @@ func FilterOutSchedulable(unschedulableCandidates []*apiv1.Pod, nodes []*apiv1.N
 	predicateChecker *simulator.PredicateChecker, expendablePodsPriorityCutoff int) []*apiv1.Pod {
 
 	unschedulablePods := []*apiv1.Pod{}
-	// 获取所有可能可以调度的 pod
+	// 获取所有已调度的 pod, 去掉满足优先级抢占的
 	nonExpendableScheduled := FilterOutExpendablePods(allScheduled, expendablePodsPriorityCutoff)
 	// 将 pod 和 node 合并为 nodeinfo
 	nodeNameToNodeInfo := scheduler_util.CreateNodeNameToInfoMap(append(nonExpendableScheduled, podsWaitingForLowerPriorityPreemption...), nodes)

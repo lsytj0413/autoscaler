@@ -234,6 +234,7 @@ func ScaleUp(context *context.AutoscalingContext, processors *ca_processors.Auto
 	nodes []*apiv1.Node, daemonSets []*extensionsv1.DaemonSet) (*status.ScaleUpStatus, errors.AutoscalerError) {
 	// From now on we only care about unschedulable pods that were marked after the newest
 	// node became available for the scheduler.
+	// DOC: 此处的 unschedulablePods 是已经经过一次重新调度处理的, 剩余的 pods
 	if len(unschedulablePods) == 0 {
 		glog.V(1).Info("No unschedulable pods")
 		return &status.ScaleUpStatus{ScaledUp: false}, nil
