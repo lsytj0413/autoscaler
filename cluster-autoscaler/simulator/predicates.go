@@ -202,11 +202,17 @@ func NewCustomTestPredicateChecker(predicateInfos []PredicateInfo) *PredicateChe
 	}
 }
 
+type Snapshoter interface {
+	Snapshot() error
+}
+
 // SnapshotClusterState updates cluster snapshot used by the predicate checker.
 // It should be called every CA loop iteration.
 func (p *PredicateChecker) SnapshotClusterState() error {
 	if p.scheduler != nil {
-		return p.scheduler.Algorithm.Snapshot()
+		if s, ok := p.scheduler.Algorithm.(Snapshoter); ok {
+			return s.Snapshot()
+		}
 	}
 	return nil
 }
